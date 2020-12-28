@@ -87,6 +87,7 @@ def ceil_int(x: float) -> int:
 
 
 def sanitize_title(x: str) -> str:
+    # return re.sub(r'\s+', ' ', x)
     return re.sub(r'\s+', ' ', re.sub(r'[\0-\x19\x80-\x9f]', '', x))
 
 

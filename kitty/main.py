@@ -151,7 +151,8 @@ def _run_app(opts: Options, args: CLIOptions, bad_lines: Sequence[BadLine] = ())
                     run_app.initial_window_size_func(get_os_window_sizing_data(opts), cached_values),
                     pre_show_callback,
                     args.title or appname, args.name or args.cls or appname,
-                    args.cls or appname, load_all_shaders)
+                    args.cls or appname, args.start_as == 'headless', load_all_shaders)
+
         boss = Boss(opts, args, cached_values, global_shortcuts)
         boss.start(window_id)
         if bad_lines:
@@ -179,8 +180,8 @@ class AppRunner:
             set_options(None)
             free_font_data()  # must free font data before glfw/freetype/fontconfig/opengl etc are finalized
             if is_macos:
-                from kitty.fast_data_types import set_notification_activated_callback
-                set_notification_activated_callback(None)
+                from kitty.fast_data_types import cocoa_set_notification_activated_callback
+                cocoa_set_notification_activated_callback(None)
 
 
 run_app = AppRunner()

@@ -12,8 +12,8 @@ from functools import partial
 from gettext import gettext as _
 from itertools import chain
 from typing import (
-    Any, Callable, Deque, Dict, Iterable, List, Optional, Pattern, Sequence,
-    Tuple, Union
+    Any, Callable, Deque, Dict, Iterable, List, Optional, Pattern, Sequence, Tuple,
+    Union,
 )
 
 from .child import ProcessDesc
@@ -978,6 +978,21 @@ class Window:
                 open_cmd(args, text, cwd=cwd)
             else:
                 open_url(text, cwd=cwd)
+
+    def go_to_prev_command_line(self):
+        if self.screen.is_main_linebuf():
+            line = self.screen.historybuf.command_line_index_from(self.screen.scrolled_by + 1, True)
+            if line is not None:
+                self.screen.scroll_to(line + 1)
+
+    def go_to_next_command_line(self):
+        if self.screen.scrolled_by <= 1:
+            return
+
+        if self.screen.is_main_linebuf():
+            line = self.screen.historybuf.command_line_index_from(self.screen.scrolled_by - 2, False)
+            if line is not None:
+                self.screen.scroll_to(line + 1)
 
     def scroll_line_up(self) -> None:
         if self.screen.is_main_linebuf():

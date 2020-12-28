@@ -10,8 +10,8 @@ from functools import lru_cache
 from gettext import gettext as _
 from itertools import repeat
 from typing import (
-    Any, Callable, Dict, Generator, Iterable, List, Optional, Pattern,
-    Sequence, Set, Tuple, Type, cast
+    Any, Callable, Dict, Generator, Iterable, List, Optional, Pattern, Sequence, Set,
+    Tuple, Type, cast,
 )
 
 from kitty.cli import parse_args
@@ -81,7 +81,7 @@ def decode_hint(x: str, alphabet: str = DEFAULT_HINT_ALPHABET) -> int:
 def highlight_mark(m: Mark, text: str, current_input: str, alphabet: str, colors: Dict[str, str]) -> str:
     hint = encode_hint(m.index, alphabet)
     if current_input and not hint.startswith(current_input):
-        return faint(text)
+        return text
     hint = hint[len(current_input):] or ' '
     text = text[len(hint):]
     return styled(
@@ -729,6 +729,7 @@ def handle_result(args: List[str], data: Dict[str, Any], target_window_id: int, 
 
     @lru_cache()
     def joined_text() -> str:
+        default_joiners = {'newline': '\n\r', 'space': ' '}
         if is_int is not None:
             try:
                 return matches[is_int]
@@ -739,8 +740,10 @@ def handle_result(args: List[str], data: Dict[str, Any], target_window_id: int, 
             return json.dumps(matches, ensure_ascii=False, indent='\t')
         if joiner == 'auto':
             q = '\n\r' if text_type in ('line', 'url') else ' '
+        elif joiner in default_joiners:
+            q = default_joiners.get(joiner, '')
         else:
-            q = {'newline': '\n\r', 'space': ' '}.get(joiner, '')
+            q = joiner
         return q.join(matches)
 
     for program in programs:

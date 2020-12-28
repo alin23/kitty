@@ -288,6 +288,34 @@ __str__(HistoryBuf *self) {
 }
 
 static PyObject*
+command_line_index_from(HistoryBuf *self, PyObject *args) {
+#define command_line_index_from_doc "command_line_index_from(start_line: int, upwards bool): Find next command line based on the first character being a Hairline Space (Unicode 0x200a)"
+    index_type from_line = 0;
+    int upwards = 1;
+
+    if (!PyArg_ParseTuple(args, "Ip", &from_line, &upwards)) return NULL;
+
+    if (upwards) {
+        for (index_type i = from_line; i < self->count; i++) {
+            init_line(self, index_of(self, i), self->line);
+            if (self->line->cpu_cells[0].ch == 8202)
+            {
+                return PyLong_FromUnsignedLong(i);
+            }
+        }
+    } else {
+        for (index_type i = from_line; i >= 0; i--) {
+            init_line(self, index_of(self, i), self->line);
+            if (self->line->cpu_cells[0].ch == 8202)
+            {
+                return PyLong_FromUnsignedLong(i);
+            }
+        }
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject*
 push(HistoryBuf *self, PyObject *args) {
 #define push_doc "Push a line into this buffer, removing the oldest line, if necessary"
     Line *line;
@@ -491,6 +519,7 @@ static PyMethodDef methods[] = {
     METHODB(as_text, METH_VARARGS),
     METHOD(dirty_lines, METH_NOARGS)
     METHOD(push, METH_VARARGS)
+    METHOD(command_line_index_from, METH_VARARGS)
     METHOD(rewrap, METH_VARARGS)
     {NULL, NULL, 0, NULL}  /* Sentinel */
 };

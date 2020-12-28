@@ -19,8 +19,8 @@ from contextlib import suppress
 from functools import partial
 from pathlib import Path
 from typing import (
-    Callable, Dict, Iterable, Iterator, List, NamedTuple, Optional,
-    Sequence, Set, Tuple, Union
+    Callable, Dict, Iterable, Iterator, List, NamedTuple, Optional, Sequence, Set,
+    Tuple, Union,
 )
 
 from glfw import glfw  # noqa
@@ -207,13 +207,11 @@ def get_python_flags(cflags: List[str]) -> List[str]:
         if ldlib:
             libs.append(os.path.join(framework_dir, ldlib))
     else:
-        ldlib = sysconfig.get_config_var('LIBDIR')
-        if ldlib:
-            libs += ['-L' + ldlib]
-        ldlib = sysconfig.get_config_var('VERSION')
-        if ldlib:
-            libs += ['-lpython' + ldlib + sys.abiflags]
-        libs += (sysconfig.get_config_var('LINKFORSHARED') or '').split()
+        libs += ['-L' + sysconfig.get_config_var('LIBDIR')]
+        libs += [
+            '-lpython' + sysconfig.get_config_var('VERSION') + sys.abiflags
+        ]
+        libs += sysconfig.get_config_var('LINKFORSHARED').replace('-Wl,-stack_size,1000000', '').split()
     return libs
 
 

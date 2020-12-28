@@ -1,0 +1,5 @@
+#!/bin/sh
+git fetch --all && \
+git rebase kovidgoyal/master && \
+LD_RUN_PATH="/usr/local/bin/libharfbuzz.so" make -j4 all && \
+python3 setup.py linux-package --update-check-interval=0

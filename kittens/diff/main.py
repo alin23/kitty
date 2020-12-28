@@ -39,7 +39,7 @@ from .config import init_config
 from .options.types import Options as DiffOptions
 from .patch import Differ, Patch, set_diff_command, worker_processes
 from .render import (
-    ImagePlacement, ImageSupportWarning, Line, LineRef, Reference, render_diff
+    ImagePlacement, ImageSupportWarning, Line, LineRef, Reference, render_diff,
 )
 from .search import BadRegex, Search
 
@@ -640,8 +640,11 @@ def main(args: List[str]) -> None:
     for message in showwarning.warnings:
         from kitty.utils import safe_print
         safe_print(message, file=sys.stderr)
-    highlight_processes = getattr(highlight_collection, 'processes', ())
-    terminate_processes(tuple(highlight_processes))
+
+    if has_highlighter:
+        highlight_processes = getattr(highlight_collection, 'processes', ())
+        terminate_processes(tuple(highlight_processes))
+
     terminate_processes(tuple(worker_processes))
     if loop.return_code != 0:
         if handler.report_traceback_on_exit:

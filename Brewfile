@@ -1,6 +1,6 @@
-pkg-config
-zlib
-python
-imagemagick
-harfbuzz
-sphinx-doc
+brew "pkg-config"
+brew "zlib"
+brew "python"
+brew "imagemagick"
+brew "harfbuzz"
+brew "sphinx-doc"

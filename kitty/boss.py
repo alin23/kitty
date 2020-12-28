@@ -203,7 +203,7 @@ class Boss:
                 os_window_id = create_os_window(
                         initial_window_size_func(size_data, self.cached_values),
                         pre_show_callback,
-                        self.args.title or appname, wname, wclass)
+                        self.args.title or appname, wname, wclass, self.args.start_as == 'headless')
         else:
             wname = self.args.name or self.args.cls or appname
             wclass = self.args.cls or appname

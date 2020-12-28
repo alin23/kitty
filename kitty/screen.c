@@ -2642,6 +2642,20 @@ scroll(Screen *self, PyObject *args) {
     Py_RETURN_FALSE;
 }
 
+static PyObject*
+scroll_to(Screen *self, PyObject *args) {
+    index_type line;
+    if (!PyArg_ParseTuple(args, "I", &line)) return NULL;
+
+    unsigned int new_scroll = MIN(line, self->historybuf->count);
+    if (new_scroll != self->scrolled_by) {
+        self->scrolled_by = new_scroll;
+        self->scroll_changed = true;
+        Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+}
+
 bool
 screen_is_selection_dirty(Screen *self) {
     IterationData q;
@@ -3087,6 +3101,7 @@ static PyMethodDef methods[] = {
     MND(text_for_marked_url, METH_NOARGS)
     MND(is_rectangle_select, METH_NOARGS)
     MND(scroll, METH_VARARGS)
+    MND(scroll_to, METH_VARARGS)
     MND(send_escape_code_to_child, METH_VARARGS)
     MND(hyperlink_at, METH_VARARGS)
     MND(toggle_alt_screen, METH_NOARGS)

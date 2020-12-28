@@ -1,0 +1,20 @@
+#!/bin/sh
+git fetch --all && \
+git rebase kovidgoyal/master
+
+XCODE=/Applications/Xcode.app
+if [[ -d '/Applications/Xcode-beta.app' ]]; then
+    XCODE=/Applications/Xcode-beta.app
+fi
+
+export CFLAGS="-Wno-nullability-completeness -Wno-nullability-extension -Wno-expansion-to-defined -Wno-newline-eof -Wno-availability -Wno-zero-length-array -Wno-nonnull -Wno-error -Wno-extra-semi -Wno-pedantic -Wno-gnu-zero-variadic-macro-arguments -I$XCODE/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include -isysroot $XCODE/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/"
+export LDFLAGS="-L$XCODE/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib"
+export CCFLAGS=$CFLAGS
+export CXXFLAGS=$CFLAGS
+export CPPFLAGS=$CFLAGS
+export CC=/usr/bin/clang
+
+make -j12 all && \
+make -j12 app && \
+rm -rf "/Applications/kitty.app" && \
+mv ./kitty.app "/Applications/"
