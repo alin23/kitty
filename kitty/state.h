@@ -30,7 +30,7 @@ typedef struct {
     unsigned int url_style;
     unsigned int scrollback_pager_history_size;
     bool scrollback_fill_enlarged_window;
-    char_type select_by_word_characters[256]; size_t select_by_word_characters_count;
+    char_type *select_by_word_characters;
     color_type url_color, background, foreground, active_border_color, inactive_border_color, bell_border_color;
     color_type mark1_foreground, mark1_background, mark2_foreground, mark2_background, mark3_foreground, mark3_background;
     monotonic_t repaint_delay, input_delay;
@@ -40,8 +40,8 @@ typedef struct {
     unsigned int macos_option_as_alt;
     float macos_thicken_font;
     WindowTitleIn macos_show_window_title_in;
-    int adjust_line_height_px, adjust_column_width_px;
-    float adjust_line_height_frac, adjust_column_width_frac;
+    int adjust_line_height_px, adjust_column_width_px, adjust_baseline_px;
+    float adjust_line_height_frac, adjust_column_width_frac, adjust_baseline_frac;
     float background_opacity, dim_opacity;
 
     char* background_image;
@@ -70,7 +70,13 @@ typedef struct {
         UrlPrefix *values;
         size_t num, max_prefix_len;
     } url_prefixes;
+    char_type *url_excluded_characters;
     bool detect_urls;
+    bool tab_bar_hidden;
+    double font_size;
+    struct {
+        double outer, inner;
+    } tab_bar_margin_height;
 } Options;
 
 typedef struct {
@@ -202,9 +208,7 @@ typedef struct {
     bool debug_rendering, debug_font_fallback;
     bool has_pending_resizes, has_pending_closes;
     bool in_sequence_mode;
-    bool tab_bar_hidden;
     bool check_for_active_animated_images;
-    double font_sz_in_pts;
     struct { double x, y; } default_dpi;
     id_type active_drag_in_window;
     int active_drag_button;
@@ -260,20 +264,23 @@ void send_prerendered_sprites_for_window(OSWindow *w);
 #ifdef __APPLE__
 void get_cocoa_key_equivalent(uint32_t, int, char *key, size_t key_sz, int*);
 typedef enum {
-    NO_COCOA_PENDING_ACTION = 0,
-    PREFERENCES_WINDOW = 1,
-    NEW_OS_WINDOW = 2,
-    NEW_OS_WINDOW_WITH_WD = 4,
-    NEW_TAB_WITH_WD = 8,
-    CLOSE_OS_WINDOW = 16,
-    CLOSE_TAB = 32,
-    NEW_TAB = 64,
-    NEXT_TAB = 128,
-    PREVIOUS_TAB = 256,
-    DETACH_TAB = 512,
-    OPEN_FILE = 1024,
-    NEW_WINDOW = 2048,
-    CLOSE_WINDOW = 4096,
+    PREFERENCES_WINDOW,
+    NEW_OS_WINDOW,
+    NEW_OS_WINDOW_WITH_WD,
+    NEW_TAB_WITH_WD,
+    CLOSE_OS_WINDOW,
+    CLOSE_TAB,
+    NEW_TAB,
+    NEXT_TAB,
+    PREVIOUS_TAB,
+    DETACH_TAB,
+    OPEN_FILE,
+    NEW_WINDOW,
+    CLOSE_WINDOW,
+    RESET_TERMINAL,
+    RELOAD_CONFIG,
+
+    NUM_COCOA_PENDING_ACTIONS
 } CocoaPendingAction;
 void set_cocoa_pending_action(CocoaPendingAction action, const char*);
 #endif
@@ -296,3 +303,4 @@ void mouse_selection(Window *w, int code, int button);
 const char* format_mods(unsigned mods);
 void send_pending_click_to_window_id(id_type, void*);
 void send_pending_click_to_window(Window*, void*);
+void get_platform_dependent_config_values(void *glfw_window);

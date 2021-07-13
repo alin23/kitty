@@ -115,6 +115,14 @@ class Tab:  # {{{
             self._set_current_layout(l0)
             self.startup(session_tab)
 
+    def apply_options(self) -> None:
+        for window in self:
+            window.apply_options()
+        self.enabled_layouts = [x.lower() for x in get_options().enabled_layouts] or ['tall']
+        if self.current_layout.name not in self.enabled_layouts:
+            self._set_current_layout(self.enabled_layouts[0])
+        self.relayout()
+
     def take_over_from(self, other_tab: 'Tab') -> None:
         self.name, self.cwd = other_tab.name, other_tab.cwd
         self.enabled_layouts = list(other_tab.enabled_layouts)
@@ -215,6 +223,7 @@ class Tab:  # {{{
         return create_layout_object_for(name, self.os_window_id, self.id)
 
     def next_layout(self) -> None:
+        '@ac:lay: Go to the next enabled layout'
         if len(self.enabled_layouts) > 1:
             for i, layout_name in enumerate(self.enabled_layouts):
                 if layout_name == self.current_layout.full_name:
@@ -227,11 +236,19 @@ class Tab:  # {{{
             self.relayout()
 
     def last_used_layout(self) -> None:
+        '@ac:lay: Go to the previously used layout'
         if len(self.enabled_layouts) > 1 and self._last_used_layout and self._last_used_layout != self._current_layout_name:
             self._set_current_layout(self._last_used_layout)
             self.relayout()
 
     def goto_layout(self, layout_name: str, raise_exception: bool = False) -> None:
+        '''
+        @ac:lay: Switch to the named layout
+
+        For example::
+
+            map f1 goto_layout tall
+        '''
         layout_name = layout_name.lower()
         if layout_name not in self.enabled_layouts:
             if raise_exception:
@@ -241,6 +258,21 @@ class Tab:  # {{{
         self._set_current_layout(layout_name)
         self.relayout()
 
+    def toggle_layout(self, layout_name: str) -> None:
+        '''
+        @ac:lay: Toggle the named layout
+
+        Switches to the named layout if another layout is current, otherwise
+        switches to the last used layout. Useful to "zoom" a window temporarily
+        by switching to the stack layout. For example::
+
+            map f1 toggle_layout stack
+        '''
+        if self._current_layout_name == layout_name:
+            self.last_used_layout()
+        else:
+            self.goto_layout(layout_name)
+
     def resize_window_by(self, window_id: int, increment: float, is_horizontal: bool) -> Optional[str]:
         increment_as_percent = self.current_layout.bias_increment_for_cell(is_horizontal) * increment
         if self.current_layout.modify_size_of_window(self.windows, window_id, increment_as_percent, is_horizontal):
@@ -249,6 +281,11 @@ class Tab:  # {{{
         return 'Could not resize'
 
     def resize_window(self, quality: str, increment: int) -> None:
+        '''
+        @ac:win: Resize the active window by the specified amount
+
+        See :ref:`window_resizing` for details.
+        '''
         if increment < 1:
             raise ValueError(increment)
         is_horizontal = quality in ('wider', 'narrower')
@@ -259,10 +296,12 @@ class Tab:  # {{{
             ring_bell()
 
     def reset_window_sizes(self) -> None:
+        '@ac:win:Reset window sizes undoing any dynamic resizing of windows'
         if self.current_layout.remove_all_biases():
             self.relayout()
 
     def layout_action(self, action_name: str, args: Sequence[str]) -> None:
+        '@ac:lay: Perform a layout specific action. See :doc:`layouts` for details'
         ret = self.current_layout.layout_action(action_name, args, self.windows)
         if ret is None:
             ring_bell()
@@ -385,11 +424,13 @@ class Tab:  # {{{
         )
 
     def close_window(self) -> None:
+        '@ac:win: Close the currently active window'
         w = self.active_window
         if w is not None:
             self.remove_window(w)
 
     def close_other_windows_in_tab(self) -> None:
+        '@ac:win: Close all windows in the tab other than the currently active window'
         if len(self.windows) > 1:
             active_window = self.active_window
             for window in tuple(self.windows):
@@ -428,6 +469,13 @@ class Tab:  # {{{
             return self.current_layout.nth_window(self.windows, n)
 
     def nth_window(self, num: int = 0) -> None:
+        '''
+        @ac:win: Focus the nth window if positive or the previously active windows if negative
+
+        For example, to ficus the previously active window::
+
+            map ctrl+p nth_window -1
+        '''
         if self.windows:
             if num < 0:
                 self.windows.make_previous_group_active(-num)
@@ -441,9 +489,11 @@ class Tab:  # {{{
             self.relayout_borders()
 
     def next_window(self) -> None:
+        '@ac:win: Focus the next window in the current tab'
         self._next_window()
 
     def previous_window(self) -> None:
+        '@ac:win: Focus the previous window in the current tab'
         self._next_window(-1)
 
     prev_window = previous_window
@@ -466,11 +516,27 @@ class Tab:  # {{{
             return self.most_recent_group(candidates)
 
     def neighboring_window(self, which: EdgeLiteral) -> None:
+        '''
+        @ac:win: Focus the neighboring window in the current tab
+
+        For example::
+
+            map ctrl+left neighboring_window left
+            map ctrl+down neighboring_window bottom
+        '''
         neighbor = self.neighboring_group_id(which)
         if neighbor:
             self.windows.set_active_group(neighbor)
 
     def move_window(self, delta: Union[EdgeLiteral, int] = 1) -> None:
+        '''
+        @ac:win: Move the window in the specified direction
+
+        For example::
+
+            map ctrl+left move_window left
+            map ctrl+down move_window bottom
+        '''
         if isinstance(delta, int):
             if self.current_layout.move_window(self.windows, delta):
                 self.relayout()
@@ -481,14 +547,17 @@ class Tab:  # {{{
                     self.relayout()
 
     def move_window_to_top(self) -> None:
+        '@ac:win: Move active window to the top (make it the first window)'
         n = self.windows.active_group_idx
         if n > 0:
             self.move_window(-n)
 
     def move_window_forward(self) -> None:
+        '@ac:win: Move active window forward (swap it with the next window)'
         self.move_window()
 
     def move_window_backward(self) -> None:
+        '@ac:win: Move active window backward (swap it with the previous window)'
         self.move_window(-1)
 
     def list_windows(self, active_window: Optional[Window], self_window: Optional[Window] = None) -> Generator[WindowDict, None, None]:
@@ -828,4 +897,13 @@ class TabManager:  # {{{
         self.tab_bar.destroy()
         del self.tab_bar
         del self.tabs
+
+    def apply_options(self) -> None:
+        for tab in self:
+            tab.apply_options()
+        self.tab_bar_hidden = get_options().tab_bar_style == 'hidden'
+        self.tab_bar.apply_options()
+        self.update_tab_bar_data()
+        self.mark_tab_bar_dirty()
+        self.tab_bar.layout()
 # }}}

@@ -2,8 +2,8 @@
 # vim:fileencoding=utf-8
 # License: GPL v3 Copyright: 2015, Kovid Goyal <kovid at kovidgoyal.net>
 
-import sys
 import os
+import sys
 from typing import List
 
 
@@ -30,8 +30,8 @@ def runpy(args: List[str]) -> None:
 
 def hold(args: List[str]) -> None:
     import subprocess
-    from contextlib import suppress
     import tty
+    from contextlib import suppress
     ret = subprocess.Popen(args[1:]).wait()
     with suppress(BaseException):
         print('\n\x1b[1;32mPress any key to exit', end='', flush=True)
@@ -49,13 +49,22 @@ def complete(args: List[str]) -> None:
 def launch(args: List[str]) -> None:
     import runpy
     sys.argv = args[1:]
-    exe = args[1]
+    try:
+        exe = args[1]
+    except IndexError:
+        raise SystemExit(
+            'usage: kitty +launch script.py [arguments to be passed to script.py ...]\n\n'
+            'script.py will be run with full access to kitty code. If script.py is '
+            'prefixed with a : it will be searched for in PATH'
+        )
     if exe.startswith(':'):
         import shutil
         q = shutil.which(exe[1:])
         if not q:
-            raise SystemExit('{} not found in PATH'.format(args[1][1:]))
+            raise SystemExit(f'{exe[1:]} not found in PATH')
         exe = q
+    if not os.path.exists(exe):
+        raise SystemExit(f'{exe} does not exist')
     runpy.run_path(exe, run_name='__main__')
 
 
@@ -72,13 +81,22 @@ def run_kitten(args: List[str]) -> None:
 
 
 def edit_config_file(args: List[str]) -> None:
+    from kitty.cli import create_default_opts
+    from kitty.fast_data_types import set_options
     from kitty.utils import edit_config_file as f
+    set_options(create_default_opts())
     f()
 
 
 def namespaced(args: List[str]) -> None:
-    func = namespaced_entry_points[args[1]]
-    func(args[1:])
+    try:
+        func = namespaced_entry_points[args[1]]
+    except KeyError:
+        pass
+    else:
+        func(args[1:])
+        return
+    raise SystemExit(f'{args[1]} is not a known entry point. Choices are: ' + ', '.join(namespaced_entry_points))
 
 
 entry_points = {

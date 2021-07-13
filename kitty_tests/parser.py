@@ -343,10 +343,11 @@ class TestParser(BaseTest):
         timeout = 0.1
         s.set_pending_timeout(timeout)
         pb = partial(self.parse_bytes_dump, s)
+
         pb('\033P=1s\033\\', ('screen_start_pending_mode',))
         pb('a')
         self.ae(str(s.line(0)), '')
-        pb('\033P=2s\033\\', ('screen_stop_pending_mode',), ('draw', 'a'))
+        pb('\033P=2s\033\\', ('draw', 'a'), ('screen_stop_pending_mode',))
         self.ae(str(s.line(0)), 'a')
         pb('\033P=1s\033\\', ('screen_start_pending_mode',))
         pb('b')
@@ -355,12 +356,35 @@ class TestParser(BaseTest):
         pb('c', ('draw', 'bc'))
         self.ae(str(s.line(0)), 'abc')
         pb('\033P=1s\033\\d', ('screen_start_pending_mode',))
-        pb('\033P=2s\033\\', ('screen_stop_pending_mode',), ('draw', 'd'))
+        pb('\033P=2s\033\\', ('draw', 'd'), ('screen_stop_pending_mode',))
         pb('\033P=1s\033\\e', ('screen_start_pending_mode',))
         pb('\033P'), pb('='), pb('2s')
-        pb('\033\\', ('screen_stop_pending_mode',), ('draw', 'e'))
-        pb('\033P=1sxyz;.;\033\\''\033P=2skjf".,><?_+)98\033\\', ('screen_start_pending_mode',), ('screen_stop_pending_mode',))
+        pb('\033\\', ('draw', 'e'), ('screen_stop_pending_mode',))
+        pb('\033P=1sxyz;.;\033\\''\033P=2skjf".,><?_+)98\033\\', ('screen_start_pending_mode',))
         pb('\033P=1s\033\\f\033P=1s\033\\', ('screen_start_pending_mode',), ('screen_start_pending_mode',))
+        pb('\033P=2s\033\\', ('draw', 'f'), ('screen_stop_pending_mode',))
+        pb('\033P=1s\033\\XXX\033P=2s\033\\', ('screen_start_pending_mode',), ('draw', 'XXX'), ('screen_stop_pending_mode',))
+
+        pb('\033[?2026hXXX\033[?2026l', ('screen_set_mode', 2026, 1), ('draw', 'XXX'), ('screen_reset_mode', 2026, 1))
+        pb('\033[?2026h\033[32ma\033[?2026l', ('screen_set_mode', 2026, 1), ('select_graphic_rendition', '32 '), ('draw', 'a'), ('screen_reset_mode', 2026, 1))
+        pb('\033[?2026h\033P+q544e\033\\ama\033P=2s\033\\',
+           ('screen_set_mode', 2026, 1), ('screen_request_capabilities', 43, '544e'), ('draw', 'ama'), ('screen_stop_pending_mode',))
+        pb('\033P=1s\033\\\033(B\033P=2s\033\\', ('screen_start_pending_mode',), ('screen_designate_charset', 0, 66), ('screen_stop_pending_mode',))
+
+        s.reset()
+        s.set_pending_timeout(timeout)
+        pb('\033[?2026h', ('screen_set_mode', 2026, 1),)
+        pb('\033P+q')
+        time.sleep(1.2 * timeout)
+        pb(
+            '544e' + '\033\\\033P=2s\033\\',
+            ('screen_request_capabilities', 43, '544e'),
+            ('Pending mode stop command issued while not in pending mode, this can be '
+             'either a bug in the terminal application or caused by a timeout with no '
+             'data received for too long or by too much data in pending mode',),
+            ('screen_stop_pending_mode',)
+        )
+        self.assertEqual(str(s.line(0)), '')
 
     def test_oth_codes(self):
         s = self.create_screen()

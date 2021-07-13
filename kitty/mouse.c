@@ -246,7 +246,7 @@ static inline void
 update_drag(Window *w) {
     Screen *screen = w->render_data.screen;
     if (screen && screen->selections.in_progress) {
-        screen_update_selection(screen, w->mouse_pos.cell_x, w->mouse_pos.cell_y, w->mouse_pos.in_left_half_of_cell, false, false);
+        screen_update_selection(screen, w->mouse_pos.cell_x, w->mouse_pos.cell_y, w->mouse_pos.in_left_half_of_cell, (SelectionUpdate){0});
     }
     set_mouse_cursor_when_dragging();
 }
@@ -281,93 +281,17 @@ drag_scroll(Window *w, OSWindow *frame) {
 }
 
 static inline void
-extend_selection(Window *w, bool ended) {
+extend_selection(Window *w, bool ended, bool extend_nearest) {
     Screen *screen = w->render_data.screen;
     if (screen_has_selection(screen)) {
-        screen_update_selection(screen, w->mouse_pos.cell_x, w->mouse_pos.cell_y, w->mouse_pos.in_left_half_of_cell, ended, false);
+        screen_update_selection(screen, w->mouse_pos.cell_x, w->mouse_pos.cell_y, w->mouse_pos.in_left_half_of_cell,
+                (SelectionUpdate){.ended=ended, .set_as_nearest_extend=extend_nearest});
     }
-}
-
-static inline void
-extend_url(Screen *screen, Line *line, index_type *x, index_type *y, char_type sentinel) {
-    unsigned int count = 0;
-    while(count++ < 10) {
-        if (*x != line->xnum - 1) break;
-        bool next_line_starts_with_url_chars = false;
-        line = screen_visual_line(screen, *y + 2);
-        if (line) next_line_starts_with_url_chars = line_startswith_url_chars(line);
-        line = screen_visual_line(screen, *y + 1);
-        if (!line) break;
-        // we deliberately allow non-continued lines as some programs, like
-        // mutt split URLs with newlines at line boundaries
-        index_type new_x = line_url_end_at(line, 0, false, sentinel, next_line_starts_with_url_chars);
-        if (!new_x && !line_startswith_url_chars(line)) break;
-        *y += 1; *x = new_x;
-    }
-}
-
-static inline char_type
-get_url_sentinel(Line *line, index_type url_start) {
-    char_type before = 0, sentinel;
-    if (url_start > 0 && url_start < line->xnum) before = line->cpu_cells[url_start - 1].ch;
-    switch(before) {
-        case '"':
-        case '\'':
-        case '*':
-            sentinel = before; break;
-        case '(':
-            sentinel = ')'; break;
-        case '[':
-            sentinel = ']'; break;
-        case '{':
-            sentinel = '}'; break;
-        case '<':
-            sentinel = '>'; break;
-        default:
-            sentinel = 0; break;
-    }
-    return sentinel;
 }
 
 static inline void
 set_mouse_cursor_for_screen(Screen *screen) {
     mouse_cursor_shape = screen->modes.mouse_tracking_mode == NO_TRACKING ? OPT(default_pointer_shape): OPT(pointer_shape_when_grabbed);
-}
-
-static inline void
-detect_url(Screen *screen, unsigned int x, unsigned int y) {
-    bool has_url = false;
-    index_type url_start, url_end = 0;
-    Line *line = screen_visual_line(screen, y);
-    if (line->cpu_cells[x].hyperlink_id) {
-        mouse_cursor_shape = HAND;
-        screen_mark_hyperlink(screen, x, y);
-        return;
-    }
-    char_type sentinel;
-    if (line) {
-        url_start = line_url_start_at(line, x);
-        sentinel = get_url_sentinel(line, url_start);
-        if (url_start < line->xnum) {
-            bool next_line_starts_with_url_chars = false;
-            if (y < screen->lines - 1) {
-                line = screen_visual_line(screen, y+1);
-                next_line_starts_with_url_chars = line_startswith_url_chars(line);
-                line = screen_visual_line(screen, y);
-            }
-            url_end = line_url_end_at(line, x, true, sentinel, next_line_starts_with_url_chars);
-        }
-        has_url = url_end > url_start;
-    }
-    if (has_url) {
-        mouse_cursor_shape = HAND;
-        index_type y_extended = y;
-        extend_url(screen, line, &url_end, &y_extended, sentinel);
-        screen_mark_url(screen, url_start, y, url_end, y_extended);
-    } else {
-        set_mouse_cursor_for_screen(screen);
-        screen_mark_url(screen, 0, 0, 0, 0);
-    }
 }
 
 static inline void
@@ -381,6 +305,12 @@ handle_mouse_movement_in_kitty(Window *w, int button, bool mouse_cell_changed) {
         }
     }
 
+}
+
+static void
+detect_url(Screen *screen, unsigned int x, unsigned int y) {
+    if (screen_detect_url(screen, x, y)) mouse_cursor_shape = HAND;
+    else set_mouse_cursor_for_screen(screen);
 }
 
 HANDLER(handle_move_event) {
@@ -587,7 +517,7 @@ static inline Window*
 window_for_event(unsigned int *window_idx, bool *in_tab_bar) {
     Region central, tab_bar;
     os_window_regions(global_state.callback_os_window, &central, &tab_bar);
-    *in_tab_bar = mouse_in_region(&tab_bar);
+    *in_tab_bar = !mouse_in_region(&central);
     if (!*in_tab_bar && global_state.callback_os_window->num_tabs > 0) {
         Tab *t = global_state.callback_os_window->tabs + global_state.callback_os_window->active_tab;
         for (unsigned int i = 0; i < t->num_windows; i++) {
@@ -649,7 +579,7 @@ end_drag(Window *w) {
     global_state.active_drag_button = -1;
     w->last_drag_scroll_at = 0;
     if (screen->selections.in_progress) {
-        screen_update_selection(screen, w->mouse_pos.cell_x, w->mouse_pos.cell_y, w->mouse_pos.in_left_half_of_cell, true, false);
+        screen_update_selection(screen, w->mouse_pos.cell_x, w->mouse_pos.cell_y, w->mouse_pos.in_left_half_of_cell, (SelectionUpdate){.ended=true});
     }
 }
 
@@ -660,6 +590,7 @@ typedef enum MouseSelectionType {
     MOUSE_SELECTION_WORD,
     MOUSE_SELECTION_LINE,
     MOUSE_SELECTION_LINE_FROM_POINT,
+    MOUSE_SELECTION_MOVE_END,
 } MouseSelectionType;
 
 
@@ -672,7 +603,7 @@ mouse_selection(Window *w, int code, int button) {
     unsigned int y1, y2;
 #define S(mode) {\
         screen_start_selection(screen, w->mouse_pos.cell_x, w->mouse_pos.cell_y, w->mouse_pos.in_left_half_of_cell, false, mode); \
-        screen_update_selection(screen, w->mouse_pos.cell_x, w->mouse_pos.cell_y, w->mouse_pos.in_left_half_of_cell, false, true); }
+        screen_update_selection(screen, w->mouse_pos.cell_x, w->mouse_pos.cell_y, w->mouse_pos.in_left_half_of_cell, (SelectionUpdate){.start_extended_selection=true}); }
 
     switch((MouseSelectionType)code) {
         case MOUSE_SELECTION_NORMAL:
@@ -691,7 +622,10 @@ mouse_selection(Window *w, int code, int button) {
             if (screen_selection_range_for_line(screen, w->mouse_pos.cell_y, &start, &end) && end > w->mouse_pos.cell_x) S(EXTEND_LINE_FROM_POINT);
             break;
         case MOUSE_SELECTION_EXTEND:
-            extend_selection(w, false);
+            extend_selection(w, false, true);
+            break;
+        case MOUSE_SELECTION_MOVE_END:
+            extend_selection(w, false, false);
             break;
     }
     set_mouse_cursor_when_dragging();
@@ -749,7 +683,7 @@ mouse_event(int button, int modifiers, int action) {
             handle_event(w, button, modifiers, window_idx);
             clamp_to_window = false;
         } else debug("no window for event\n");
-    }
+    } else debug("\n");
     if (mouse_cursor_shape != old_cursor) {
         set_mouse_cursor(mouse_cursor_shape);
     }
@@ -933,6 +867,7 @@ init_mouse(PyObject *module) {
     PyModule_AddIntMacro(module, MOUSE_SELECTION_WORD);
     PyModule_AddIntMacro(module, MOUSE_SELECTION_LINE);
     PyModule_AddIntMacro(module, MOUSE_SELECTION_LINE_FROM_POINT);
+    PyModule_AddIntMacro(module, MOUSE_SELECTION_MOVE_END);
     if (PyModule_AddFunctions(module, module_methods) != 0) return false;
     return true;
 }

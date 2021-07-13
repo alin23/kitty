@@ -54,8 +54,11 @@ type it each time::
 
     alias ssh="kitty +kitten ssh"
 
+Remember to also setup :ref:`completion`.
+
 If for some reason that does not work (typically because the server is using a
-non POSIX compliant shell), you can try using it with python instead::
+non POSIX compliant shell as ``/bin/sh``), you can try using it with ``python``
+instead::
 
     kitty +kitten ssh use-python myserver
 
@@ -64,7 +67,7 @@ server, use the following one-liner instead (it
 is slower as it needs to ssh into the server twice, but will work with most
 servers)::
 
-    infocmp xterm-kitty | ssh myserver tic -x -o \~/.terminfo /dev/stdin
+    infocmp -a xterm-kitty | ssh myserver tic -x -o \~/.terminfo /dev/stdin
 
 If you are behind a proxy (like Balabit) that prevents this, you must redirect the
 1st command to a file, copy that to the server and run ``tic`` manually.  If you
@@ -120,7 +123,7 @@ How do I change the colors in a running kitty instance?
 ------------------------------------------------------------
 
 You can either use the
-`OSC terminal escape codes <https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-Operating-System-Commands>`_
+`OSC terminal escape codes <https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-Operating-System-Commands>`_
 to set colors or you can define keyboard shortcuts to set colors, for example::
 
     map f1 set_colors --configured /path/to/some/config/file/colors.conf
@@ -240,7 +243,7 @@ How do I map key presses in kitty to different keys in the terminal program?
 This is accomplished by using ``map`` with :sc:`send_text <send_text>` in :file:`kitty.conf`.
 For example::
 
-    map alt+s send_text all \x13
+    map alt+s send_text normal,application \x13
 
 This maps :kbd:`alt+s` to :kbd:`ctrl+s`. To figure out what bytes to use for
 the :sc:`send_text <send_text>` you can use the ``show_key`` kitten. Run::

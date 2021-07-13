@@ -14,18 +14,22 @@ from contextlib import suppress
 from functools import lru_cache
 from time import monotonic
 from typing import (
-    Any, Callable, Dict, Generator, Iterable, List, Mapping, Match, NamedTuple,
-    Optional, Tuple, Union, cast
+    TYPE_CHECKING, Any, Callable, Dict, Generator, Iterable, List, Mapping,
+    Match, NamedTuple, Optional, Tuple, Union, cast
 )
 
 from .constants import (
     appname, is_macos, is_wayland, read_kitty_resource, shell_path,
     supports_primary_selection
 )
-from .options_stub import Options
 from .rgb import Color, to_color
 from .types import run_once
 from .typing import AddressFamily, PopenType, Socket, StartupCtx
+
+if TYPE_CHECKING:
+    from .options.types import Options
+else:
+    Options = object
 
 
 def expandvars(val: str, env: Mapping[str, str] = {}, fallback_to_os_env: bool = True) -> str:
@@ -72,9 +76,10 @@ def safe_print(*a: Any, **k: Any) -> None:
 
 def log_error(*a: Any, **k: str) -> None:
     from .fast_data_types import log_error_string
+    output = getattr(log_error, 'redirect', log_error_string)
     with suppress(Exception):
-        msg = k.get('sep', ' ').join(map(str, a)) + k.get('end', '')
-        log_error_string(msg.replace('\0', ''))
+        msg = k.get('sep', ' ').join(map(str, a)) + k.get('end', '').replace('\0', '')
+        output(msg)
 
 
 def ceil_int(x: float) -> int:
@@ -521,8 +526,8 @@ def get_editor_from_env_vars(opts: Optional[Options] = None) -> List[str]:
 
 def get_editor(opts: Optional[Options] = None) -> List[str]:
     if opts is None:
-        from .cli import create_default_opts
-        opts = create_default_opts()
+        from .fast_data_types import get_options
+        opts = get_options()
     if opts.editor == '.':
         return get_editor_from_env_vars()
     import shlex

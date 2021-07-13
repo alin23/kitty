@@ -15,33 +15,34 @@ from typing import (
 )
 from weakref import WeakValueDictionary
 
-from .child import cached_process_data, cwd_of_process, default_env
+from .child import (
+    cached_process_data, cwd_of_process, default_env, set_default_env
+)
 from .cli import create_opts, parse_args
 from .cli_stub import CLIOptions
-from .conf.utils import BadLine, to_cmdline
-from .config import (
-    KeyAction, SubSequenceMap, common_opts_as_dict,
-    prepare_config_file_for_editing
-)
-from .options_types import MINIMUM_FONT_SIZE
+from .conf.utils import BadLine, KeyAction, to_cmdline
+from .config import common_opts_as_dict, prepare_config_file_for_editing
 from .constants import (
-    appname, config_dir, is_macos, kitty_exe, supports_primary_selection
+    appname, config_dir, is_macos, is_wayland, kitty_exe,
+    supports_primary_selection
 )
 from .fast_data_types import (
     CLOSE_BEING_CONFIRMED, IMPERATIVE_CLOSE_REQUESTED, NO_CLOSE_REQUESTED,
-    ChildMonitor, KeyEvent, add_timer, background_opacity_of,
-    change_background_opacity, change_os_window_state, cocoa_set_menubar_title,
-    create_os_window, current_application_quit_request, current_os_window,
-    destroy_global_data, focus_os_window, get_clipboard_string, get_options,
-    global_font_size, mark_os_window_for_close, os_window_font_size,
-    patch_global_colors, safe_pipe, set_application_quit_request,
-    set_background_image, set_boss, set_clipboard_string, set_in_sequence_mode,
-    thread_write, toggle_fullscreen, toggle_maximized
+    ChildMonitor, KeyEvent, add_timer, apply_options_update,
+    background_opacity_of, change_background_opacity, change_os_window_state,
+    cocoa_set_menubar_title, create_os_window,
+    current_application_quit_request, current_os_window, destroy_global_data,
+    focus_os_window, get_clipboard_string, get_options, global_font_size,
+    mark_os_window_for_close, os_window_font_size, patch_global_colors,
+    safe_pipe, set_application_quit_request, set_background_image, set_boss,
+    set_clipboard_string, set_in_sequence_mode, set_options, thread_write,
+    toggle_fullscreen, toggle_maximized
 )
 from .keys import get_shortcut, shortcut_matches
 from .layout.base import set_layout_options
 from .notify import notification_activated
-from .options_stub import Options
+from .options.types import Options
+from .options.utils import MINIMUM_FONT_SIZE, SubSequenceMap
 from .os_window_size import initial_window_size_func
 from .rgb import Color, color_from_int
 from .session import Session, create_sessions, get_os_window_sizing_data
@@ -53,8 +54,8 @@ from .typing import PopenType, TypedDict
 from .utils import (
     func_name, get_editor, get_primary_selection, is_path_in_temp_dir,
     log_error, open_url, parse_address_spec, parse_uri_list,
-    platform_window_id, remove_socket_file, safe_print, set_primary_selection,
-    single_instance, startup_notification_handler
+    platform_window_id, read_shell_environment, remove_socket_file, safe_print,
+    set_primary_selection, single_instance, startup_notification_handler
 )
 from .window import MatchPatternType, Window
 
@@ -168,15 +169,19 @@ class Boss:
         )
         set_boss(self)
         self.args = args
-        self.keymap = get_options().keymap.copy()
         self.global_shortcuts_map = {v: KeyAction(k) for k, v in global_shortcuts.items()}
-        for sc in global_shortcuts.values():
-            self.keymap.pop(sc, None)
+        self.global_shortcuts = global_shortcuts
+        self.update_keymap()
         if is_macos:
             from .fast_data_types import (
                 cocoa_set_notification_activated_callback
             )
             cocoa_set_notification_activated_callback(notification_activated)
+
+    def update_keymap(self) -> None:
+        self.keymap = get_options().keymap.copy()
+        for sc in self.global_shortcuts.values():
+            self.keymap.pop(sc, None)
 
     def startup_first_child(self, os_window_id: Optional[int]) -> None:
         startup_sessions = create_sessions(get_options(), self.args, default_session=get_options().startup_session)
@@ -294,6 +299,12 @@ class Boss:
                 if q:
                     found = True
                     yield q
+        elif field == 'index':
+            tm = self.active_tab_manager
+            if tm is not None and len(tm.tabs) > 0:
+                idx = (int(pat.pattern) + len(tm.tabs)) % len(tm.tabs)
+                found = True
+                yield tm.tabs[idx]
         if not found:
             tabs = {self.tab_for_window(w) for w in self.match_windows(match)}
             for q in tabs:
@@ -321,6 +332,7 @@ class Boss:
         return self.add_os_window(startup_session)
 
     def new_os_window(self, *args: str) -> None:
+        '@ac:win: New OS Window'
         self._new_os_window(args)
 
     @property
@@ -330,6 +342,7 @@ class Boss:
             return t.active_window_for_cwd
 
     def new_os_window_with_cwd(self, *args: str) -> None:
+        '@ac:win: New OS Window with the same working directory as the currently active window'
         w = self.active_window_for_cwd
         cwd_from = w.child.pid_for_cwd if w is not None else None
         self._new_os_window(args, cwd_from)
@@ -366,6 +379,15 @@ class Boss:
         return response
 
     def remote_control(self, *args: str) -> None:
+        '''
+        @ac:misc: Run a remote control command
+
+        For example::
+
+            map F1 remote_control set-spacing margin=30
+
+        See :ref:`rc_mapping` for details.
+        '''
         from .rc.base import (
             PayloadGetter, command_for_name, parse_subcommand_cli
         )
@@ -478,6 +500,7 @@ class Boss:
             self.child_monitor.mark_for_close(window.id)
 
     def close_tab(self, tab: Optional[Tab] = None) -> None:
+        '@ac:tab: Close the current tab'
         tab = tab or self.active_tab
         if tab:
             self.confirm_tab_close(tab)
@@ -510,9 +533,11 @@ class Boss:
             self.close_window(window)
 
     def toggle_fullscreen(self) -> None:
+        '@ac:win: Toggle the fullscreen status of the active OS Window'
         toggle_fullscreen()
 
     def toggle_maximized(self) -> None:
+        '@ac:win: Toggle the maximized status of the active OS Window'
         toggle_maximized()
 
     def start(self, first_os_window_id: int) -> None:
@@ -540,6 +565,21 @@ class Boss:
                 tm.resize()
 
     def clear_terminal(self, action: str, only_active: bool) -> None:
+        '''
+        @ac:misc: Clear the terminal
+
+        See :sc:`reset_terminal` for details. For example::
+
+            # Reset the terminal
+            map kitty_mod+f9 clear_terminal reset active
+            # Clear the terminal screen by erasing all contents
+            map kitty_mod+f10 clear_terminal clear active
+            # Clear the terminal scrollback by erasing it
+            map kitty_mod+f11 clear_terminal scrollback active
+            # Scroll the contents of the screen into the scrollback
+            map kitty_mod+f12 clear_terminal scroll active
+
+        '''
         if only_active:
             windows = []
             w = self.active_window
@@ -574,6 +614,11 @@ class Boss:
         self.change_font_size(True, None, new_size)
 
     def change_font_size(self, all_windows: bool, increment_operation: Optional[str], amt: float) -> None:
+        '''
+        @ac:win: Change the font size for the current or all OS Windows
+
+        See :ref:`conf-kitty-shortcuts.fonts` for details.
+        '''
         def calc_new_size(old_size: float) -> float:
             new_size = old_size
             if amt == 0:
@@ -630,6 +675,15 @@ class Boss:
         change_background_opacity(os_window_id, max(0.1, min(opacity, 1.0)))
 
     def set_background_opacity(self, opacity: str) -> None:
+        '''
+        @ac:win: Set the background opacity for the active OS Window
+
+        For example::
+
+            map f1 set_background_opacity +0.1
+            map f2 set_background_opacity -0.1
+            map f3 set_background_opacity 0.5
+        '''
         window = self.active_window
         if window is None or not opacity:
             return
@@ -706,6 +760,11 @@ class Boss:
                 self.dispatch_action(matched_action)
 
     def start_resizing_window(self) -> None:
+        '''
+        @ac:win: Resize the active window interactively
+
+        See :ref:`window_resizing` for details.
+        '''
         w = self.active_window
         if w is None:
             return
@@ -772,6 +831,17 @@ class Boss:
         return False
 
     def combine(self, *actions: KeyAction) -> None:
+        '''
+        @ac:misc: Combine multiple actions and map to a single keypress
+
+        The syntax is::
+
+            map key combine <separator> action1 <separator> action2 <separator> action3 ...
+
+        For example::
+
+            map kitty_mod+e combine : new_window : next_layout
+        '''
         for key_action in actions:
             self.dispatch_action(key_action)
 
@@ -807,6 +877,7 @@ class Boss:
                 w.paste(text)
 
     def close_os_window(self) -> None:
+        '@ac:win: Close the currently active OS Window'
         tm = self.active_tab_manager
         if tm is not None:
             self.confirm_os_window_close(tm.os_window_id)
@@ -846,6 +917,7 @@ class Boss:
             action()
 
     def quit(self, *args: Any) -> None:
+        '@ac:win: Quit, closing all windows'
         tm = self.active_tab
         num = 0
         for q in self.os_window_map.values():
@@ -877,15 +949,36 @@ class Boss:
                 s.shutdown(socket.SHUT_RDWR)
             s.close()
 
-    def display_scrollback(self, window: Window, data: Optional[bytes], cmd: List[str]) -> None:
+    def display_scrollback(self, window: Window, data: Union[bytes, str], input_line_number: int = 0, title: str = '') -> None:
+        def prepare_arg(x: str) -> str:
+            x = x.replace('INPUT_LINE_NUMBER', str(input_line_number))
+            x = x.replace('CURSOR_LINE', str(window.screen.cursor.y + 1))
+            x = x.replace('CURSOR_COLUMN', str(window.screen.cursor.x + 1))
+            return x
+
+        cmd = list(map(prepare_arg, get_options().scrollback_pager))
+        if not os.path.isabs(cmd[0]):
+            import shutil
+            exe = shutil.which(cmd[0])
+            if not exe:
+                env = read_shell_environment(get_options())
+                if env and 'PATH' in env:
+                    exe = shutil.which(cmd[0], path=env['PATH'])
+                    if exe:
+                        cmd[0] = exe
+
+        if os.path.basename(cmd[0]) == 'less':
+            cmd.append('-+F')  # reset --quit-if-one-screen
         tab = self.active_tab
         if tab is not None:
+            bdata = data.encode('utf-8') if isinstance(data, str) else data
             tab.new_special_window(
-                SpecialWindow(cmd, data, _('History'), overlay_for=window.id, cwd=window.cwd_of_child),
+                SpecialWindow(cmd, bdata, title or _('History'), overlay_for=window.id, cwd=window.cwd_of_child),
                 copy_colors_from=self.active_window
                 )
 
     def edit_config_file(self, *a: Any) -> None:
+        '@ac:misc: Edit the kitty.conf config file in your favorite text editor'
         confpath = prepare_config_file_for_editing()
         # On macOS vim fails to handle SIGWINCH if it occurs early, so add a
         # small delay.
@@ -976,6 +1069,7 @@ class Boss:
             return overlay_window
 
     def kitten(self, kitten: str, *args: str) -> None:
+        '@ac:misc: Run the specified kitten. See :doc:`/kittens/custom` for details'
         import shlex
         cmdline = args[0] if args else ''
         kargs = shlex.split(cmdline) if cmdline else []
@@ -992,9 +1086,11 @@ class Boss:
             end_kitten(data, target_window_id, self)
 
     def input_unicode_character(self) -> None:
+        '@ac:misc: Input an arbitrary unicode character. See :doc:`/kittens/unicode-input` for details.'
         self._run_kitten('unicode_input')
 
     def set_tab_title(self) -> None:
+        '@ac:tab: Change the title of the active tab'
         tab = self.active_tab
         if tab:
             args = ['--name=tab-title', '--message', _('Enter the new title for this tab below.'), 'do_set_tab_title', str(tab.id)]
@@ -1013,6 +1109,7 @@ class Boss:
         self._run_kitten('show_error', args=['--title', title], input_data=msg)
 
     def create_marker(self) -> None:
+        '@ac:mk: Create a new marker'
         w = self.active_window
         if w:
             spec = None
@@ -1035,7 +1132,8 @@ class Boss:
                 ],
                 custom_callback=done, action_on_removal=done2)
 
-    def kitty_shell(self, window_type: str) -> None:
+    def kitty_shell(self, window_type: str = 'window') -> None:
+        '@ac:misc: Run the kitty shell to control kitty with commands'
         kw: Dict[str, Any] = {}
         cmd = [kitty_exe(), '@']
         aw = self.active_window
@@ -1083,6 +1181,10 @@ class Boss:
         if not found_action:
             open_url(url, program or get_options().open_url_with, cwd=cwd)
 
+    def open_url_with_hints(self) -> None:
+        '@ac:misc: Click a URL using the keyboard'
+        self._run_kitten('hints')
+
     def drain_actions(self, actions: List) -> None:
 
         def callback(timer_id: Optional[int]) -> None:
@@ -1109,6 +1211,7 @@ class Boss:
                 w.paste(text)
 
     def paste_from_clipboard(self) -> None:
+        '@ac:cp: Paste from the clipboard to the active window'
         text = get_clipboard_string()
         self.paste_to_active_window(text)
 
@@ -1119,6 +1222,7 @@ class Boss:
         return get_primary_selection() if supports_primary_selection else get_clipboard_string()
 
     def paste_from_selection(self) -> None:
+        '@ac:cp: Paste from the clipboard to the active window'
         text = self.current_primary_selection_or_clipboard()
         self.paste_to_active_window(text)
 
@@ -1132,6 +1236,11 @@ class Boss:
                     self.copy_to_buffer(get_options().copy_on_select)
 
     def copy_to_buffer(self, buffer_name: str) -> None:
+        '''
+        @ac:cp: Copy the selection from the active window to the specified buffer
+
+        See :ref:`cpbuf` for details.
+        '''
         w = self.active_window
         if w is not None and not w.destroyed:
             text = w.text_for_selection()
@@ -1144,6 +1253,11 @@ class Boss:
                     self.clipboard_buffers[buffer_name] = text
 
     def paste_from_buffer(self, buffer_name: str) -> None:
+        '''
+        @ac:cp: Paste from the specified buffer to the active window
+
+        See :ref:`cpbuf` for details.
+        '''
         if buffer_name == 'clipboard':
             text: Optional[str] = get_clipboard_string()
         elif buffer_name == 'primary':
@@ -1154,6 +1268,11 @@ class Boss:
             self.paste_to_active_window(text)
 
     def goto_tab(self, tab_num: int) -> None:
+        '''
+        @ac:tab: Go to the specified tab, by number, starting with 1
+
+        Zero and negative numbers go to previously active tabs
+        '''
         tm = self.active_tab_manager
         if tm is not None:
             tm.goto_tab(tab_num - 1)
@@ -1165,11 +1284,13 @@ class Boss:
         return False
 
     def next_tab(self) -> None:
+        '@ac:tab: Make the next tab active'
         tm = self.active_tab_manager
         if tm is not None:
             tm.next_tab()
 
     def previous_tab(self) -> None:
+        '@ac:tab: Make the previous tab active'
         tm = self.active_tab_manager
         if tm is not None:
             tm.next_tab(-1)
@@ -1329,9 +1450,11 @@ class Boss:
         self._new_tab(args, as_neighbor=as_neighbor, cwd_from=cwd_from)
 
     def new_tab(self, *args: str) -> None:
+        '@ac:tab: Create a new tab'
         self._create_tab(list(args))
 
     def new_tab_with_cwd(self, *args: str) -> None:
+        '@ac:tab: Create a new tab with working directory for the window in it set to the same as the active window'
         w = self.active_window_for_cwd
         cwd_from = w.child.pid_for_cwd if w is not None else None
         self._create_tab(list(args), cwd_from=cwd_from)
@@ -1359,9 +1482,11 @@ class Boss:
                 return tab.new_window(cwd_from=cwd_from, location=location, allow_remote_control=allow_remote_control)
 
     def new_window(self, *args: str) -> None:
+        '@ac:win: Create a new window'
         self._new_window(list(args))
 
     def new_window_with_cwd(self, *args: str) -> None:
+        '@ac:win: Create a new window with working directory same as that of the active window'
         w = self.active_window_for_cwd
         if w is None:
             return self.new_window(*args)
@@ -1369,21 +1494,33 @@ class Boss:
         self._new_window(list(args), cwd_from=cwd_from)
 
     def launch(self, *args: str) -> None:
+        '''
+        @ac:misc: Launch the specified program in a new window/tab/etc.
+
+        See :doc:`launch` for details
+        '''
         from kitty.launch import launch, parse_launch_args
         opts, args_ = parse_launch_args(args)
         launch(self, opts, args_)
 
     def move_tab_forward(self) -> None:
+        '@ac:tab: Move the active tab forward'
         tm = self.active_tab_manager
         if tm is not None:
             tm.move_tab(1)
 
     def move_tab_backward(self) -> None:
+        '@ac:tab: Move the active tab backward'
         tm = self.active_tab_manager
         if tm is not None:
             tm.move_tab(-1)
 
     def disable_ligatures_in(self, where: Union[str, Iterable[Window]], strategy: int) -> None:
+        '''
+        @ac:misc: Turn on/off ligatures in the specified window
+
+        See :opt:`disable_ligatures` for details
+        '''
         if isinstance(where, str):
             windows: List[Window] = []
             if where == 'active':
@@ -1413,6 +1550,51 @@ class Boss:
         for tm in self.all_tab_managers:
             tm.tab_bar.patch_colors(spec)
         patch_global_colors(spec, configured)
+
+    def apply_new_options(self, opts: Options) -> None:
+        from .fonts.box_drawing import set_scale
+
+        # Update options storage
+        set_options(opts, is_wayland(), self.args.debug_rendering, self.args.debug_font_fallback)
+        apply_options_update()
+        set_layout_options(opts)
+        set_default_env(opts.env.copy())
+        # Update font data
+        set_scale(opts.box_drawing_scale)
+        from .fonts.render import set_font_family
+        set_font_family(opts, debug_font_matching=self.args.debug_font_fallback)
+        for os_window_id, tm in self.os_window_map.items():
+            if tm is not None:
+                os_window_font_size(os_window_id, opts.font_size, True)
+                tm.resize()
+        # Update key bindings
+        self.update_keymap()
+        # Update misc options
+        for tm in self.all_tab_managers:
+            tm.apply_options()
+        # Update colors
+        for w in self.all_windows:
+            self.default_bg_changed_for(w.id)
+            w.refresh()
+
+    def load_config_file(self, *paths: str, apply_overrides: bool = True) -> None:
+        '''
+        @ac:misc: Reload the config file
+
+        If mapped without arguments reloads the default config file, otherwise loads
+        the specified config files, in order. Loading a config file *replaces* all
+        config options. For example::
+
+            map f5 load_config_file /path/to/some/kitty.conf
+        '''
+        from .config import load_config
+        old_opts = get_options()
+        paths = paths or old_opts.config_paths
+        bad_lines: List[BadLine] = []
+        opts = load_config(*paths, overrides=old_opts.config_overrides if apply_overrides else None, accumulate_bad_lines=bad_lines)
+        if bad_lines:
+            self.show_bad_config_lines(bad_lines)
+        self.apply_new_options(opts)
 
     def safe_delete_temp_file(self, path: str) -> None:
         if is_path_in_temp_dir(path):
@@ -1462,6 +1644,13 @@ class Boss:
         self.show_error(_('Errors in kitty.conf'), msg)
 
     def set_colors(self, *args: str) -> None:
+        '''
+        @ac:misc: Change colors in the specified windows
+
+        For details, see :ref:`at_set-colors`. For example::
+
+            map f5 set_colors --configured /path/to/some/config/file/colors.conf
+        '''
         from kitty.rc.base import (
             PayloadGetter, command_for_name, parse_subcommand_cli
         )
@@ -1524,6 +1713,7 @@ class Boss:
         target_tab.make_active()
 
     def select_tab(self) -> None:
+        '@ac:tab: Interactively select a tab to switch to'
         title = 'Choose a tab to switch to'
         lines = [title, '']
         fmt = ': {1}'
@@ -1556,6 +1746,11 @@ class Boss:
         )
 
     def detach_window(self, *args: str) -> None:
+        '''
+        @ac:win: Detach a window, moving it to another tab or OS Window
+
+        See :ref:`detaching windows <detach_window>` for details.
+        '''
         if not args or args[0] == 'new':
             return self._move_window_to(target_os_window_id='new')
         if args[0] == 'new-tab':
@@ -1606,6 +1801,11 @@ class Boss:
         )
 
     def detach_tab(self, *args: str) -> None:
+        '''
+        @ac:tab: Detach a tab, moving it to another OS Window
+
+        See :ref:`detaching windows <detach_window>` for details.
+        '''
         if not args or args[0] == 'new':
             return self._move_tab_to()
 
@@ -1678,10 +1878,11 @@ class Boss:
             w.report_notification_activated(identifier)
 
     def show_kitty_env_vars(self) -> None:
+        '@ac:misc: Show the environment variables that the kitty process sees'
         w = self.active_window
         if w:
-            output = '\n'.join(f'{k}={v}' for k, v in os.environ.items()).encode('utf-8')
-            self.display_scrollback(w, output, ['less'])
+            output = '\n'.join(f'{k}={v}' for k, v in os.environ.items())
+            self.display_scrollback(w, output, title=_('Current kitty env vars'))
 
     def open_file(self, path: str) -> None:
         if path == ":cocoa::application launched::":
@@ -1700,3 +1901,18 @@ class Boss:
         self.new_window(path)
         if w is not None:
             tab.remove_window(w)
+
+    def debug_config(self) -> None:
+        '@ac:misc: Show the effective configuration kitty is running with'
+        from .debug_config import debug_config
+        w = self.active_window
+        if w is not None:
+            output = debug_config(get_options())
+            set_clipboard_string(re.sub(r'\x1b.+?m', '', output))
+            output += '\n\x1b[35mThis debug output has been copied to the clipboard\x1b[m'
+            self.display_scrollback(w, output, title=_('Current kitty options'))
+
+    def discard_event(self) -> None:
+        '@ac:misc: Discard this event completely ignoring it'
+        pass
+    mouse_discard_event = discard_event

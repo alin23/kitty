@@ -39,7 +39,7 @@ typedef struct {
 typedef struct {
     SelectionBoundary start, end, input_start, input_current;
     unsigned int start_scrolled_by, end_scrolled_by;
-    bool rectangle_select;
+    bool rectangle_select, adjusting_start;
     IterationData last_rendered;
     int sort_y, sort_x;
 } Selection;
@@ -116,11 +116,10 @@ typedef struct {
     CursorRenderInfo cursor_render_info;
 
     struct {
-        size_t capacity, used, stop_buf_pos;
+        size_t capacity, used;
         uint8_t *buf;
         monotonic_t activated_at, wait_time;
-        int state;
-        uint8_t stop_buf[32];
+        unsigned stop_escape_code_type;
     } pending_mode;
     DisableLigature disable_ligatures;
     PyObject *marker;
@@ -166,6 +165,7 @@ void screen_clear_tab_stop(Screen *self, unsigned int how);
 void screen_set_mode(Screen *self, unsigned int mode);
 void screen_reset_mode(Screen *self, unsigned int mode);
 void screen_decsace(Screen *self, unsigned int);
+void screen_xtversion(Screen *self, unsigned int);
 void screen_insert_characters(Screen *self, unsigned int count);
 void screen_cursor_up(Screen *self, unsigned int count/*=1*/, bool do_carriage_return/*=false*/, int move_direction/*=-1*/);
 void screen_set_cursor(Screen *self, unsigned int mode, uint8_t secondary);
@@ -212,7 +212,10 @@ bool screen_is_cursor_visible(Screen *self);
 bool screen_selection_range_for_line(Screen *self, index_type y, index_type *start, index_type *end);
 bool screen_selection_range_for_word(Screen *self, const index_type x, const index_type y, index_type *, index_type *, index_type *start, index_type *end, bool);
 void screen_start_selection(Screen *self, index_type x, index_type y, bool, bool, SelectionExtendMode);
-void screen_update_selection(Screen *self, index_type x, index_type y, bool in_left_half, bool ended, bool start_extended_selection);
+typedef struct SelectionUpdate {
+    bool ended, start_extended_selection, set_as_nearest_extend;
+} SelectionUpdate;
+void screen_update_selection(Screen *self, index_type x, index_type y, bool in_left_half, SelectionUpdate upd);
 bool screen_history_scroll(Screen *self, int amt, bool upwards);
 Line* screen_visual_line(Screen *self, index_type y);
 unsigned long screen_current_char_width(Screen *self);
@@ -232,6 +235,7 @@ void screen_pop_key_encoding_flags(Screen *self, uint32_t num);
 uint8_t screen_current_key_encoding_flags(Screen *self);
 void screen_report_key_encoding_flags(Screen *self);
 void screen_xtmodkeys(Screen *self, uint32_t p1, uint32_t p2);
+bool screen_detect_url(Screen *screen, unsigned int x, unsigned int y);
 #define DECLARE_CH_SCREEN_HANDLER(name) void screen_##name(Screen *screen);
 DECLARE_CH_SCREEN_HANDLER(bell)
 DECLARE_CH_SCREEN_HANDLER(backspace)

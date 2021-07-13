@@ -302,11 +302,22 @@ calc_cell_width(Face *self) {
     return ans;
 }
 
+
+static unsigned int
+adjust_ypos(unsigned int pos, unsigned int cell_height, int adjustment) {
+    if (adjustment >= 0) adjustment = MIN(adjustment, (int)pos - 1);
+    else adjustment = MAX(adjustment, (int)pos - (int)cell_height + 1);
+    return pos - adjustment;
+}
+
 void
 cell_metrics(PyObject *s, unsigned int* cell_width, unsigned int* cell_height, unsigned int* baseline, unsigned int* underline_position, unsigned int* underline_thickness, unsigned int* strikethrough_position, unsigned int* strikethrough_thickness) {
     Face *self = (Face*)s;
     *cell_width = calc_cell_width(self);
     *cell_height = calc_cell_height(self, true);
+    int baseline_offset = 0;
+    if (OPT(adjust_baseline_px) != 0) baseline_offset = OPT(adjust_baseline_px);
+    else if (OPT(adjust_baseline_frac) != 0) baseline_offset = (int)(*cell_height * OPT(adjust_baseline_frac));
     *baseline = font_units_to_pixels_y(self, self->ascender);
     *underline_position = MIN(*cell_height - 1, (unsigned int)font_units_to_pixels_y(self, MAX(0, self->ascender - self->underline_position)));
     *underline_thickness = MAX(1, font_units_to_pixels_y(self, self->underline_thickness));
@@ -320,6 +331,11 @@ cell_metrics(PyObject *s, unsigned int* cell_width, unsigned int* cell_height, u
       *strikethrough_thickness = MAX(1, font_units_to_pixels_y(self, self->strikethrough_thickness));
     } else {
       *strikethrough_thickness = *underline_thickness;
+    }
+    if (baseline_offset) {
+        *baseline = adjust_ypos(*baseline, *cell_height, baseline_offset);
+        *underline_position = adjust_ypos(*underline_position, *cell_height, baseline_offset);
+        *strikethrough_position = adjust_ypos(*strikethrough_position, *cell_height, baseline_offset);
     }
 }
 
@@ -551,20 +567,19 @@ copy_color_bitmap(uint8_t *src, pixel* dest, Region *src_rect, Region *dest_rect
 }
 
 static inline void
-place_bitmap_in_canvas(pixel *cell, ProcessedBitmap *bm, size_t cell_width, size_t cell_height, float x_offset, float y_offset, size_t baseline) {
+place_bitmap_in_canvas(pixel *cell, ProcessedBitmap *bm, size_t cell_width, size_t cell_height, float x_offset, float y_offset, size_t baseline, unsigned int glyph_num) {
     // We want the glyph to be positioned inside the cell based on the bearingX
     // and bearingY values, making sure that it does not overflow the cell.
 
     Region src = { .left = bm->start_x, .bottom = bm->rows, .right = bm->width + bm->start_x }, dest = { .bottom = cell_height, .right = cell_width };
 
     // Calculate column bounds
-    int32_t xoff = (ssize_t)(x_offset + bm->bitmap_left);
-    uint32_t extra;
+    int32_t xoff = (int32_t)(x_offset + bm->bitmap_left);
     if (xoff < 0) src.left += -xoff;
     else dest.left = xoff;
-    // Move the dest start column back if the width overflows because of it
-    if (dest.left > 0 && dest.left + bm->width > cell_width) {
-        extra = dest.left + bm->width - cell_width;
+    // Move the dest start column back if the width overflows because of it, but only if we are not in a very long/infinite ligature
+    if (glyph_num < 4 && dest.left > 0 && dest.left + bm->width > cell_width) {
+        uint32_t extra = dest.left + bm->width - cell_width;
         dest.left = extra > dest.left ? 0 : dest.left - extra;
     }
 
@@ -576,7 +591,7 @@ place_bitmap_in_canvas(pixel *cell, ProcessedBitmap *bm, size_t cell_width, size
         dest.top = baseline - yoff;
     }
 
-    /* printf("x_offset: %d bearing_x: %f y_offset: %d bearing_y: %f src_start_row: %u src_start_column: %u dest_start_row: %u dest_start_column: %u bm_width: %lu bitmap_rows: %lu\n", xoff, bearing_x, yoff, bearing_y, src.top, src.left, dest.top, dest.left, bm->width, bm->rows); */
+    /* printf("x_offset: %d y_offset: %d src_start_row: %u src_start_column: %u dest_start_row: %u dest_start_column: %u bm_width: %lu bitmap_rows: %lu\n", xoff, yoff, src.top, src.left, dest.top, dest.left, bm->width, bm->rows); */
 
     if (bm->pixel_mode == FT_PIXEL_MODE_BGRA) {
         copy_color_bitmap(bm->buf, cell, &src, &dest, bm->stride, cell_width);
@@ -615,7 +630,7 @@ render_glyphs_in_cells(PyObject *f, bool bold, bool italic, hb_glyph_info_t *inf
         x_offset = x + (float)positions[i].x_offset / 64.0f;
         y = (float)positions[i].y_offset / 64.0f;
         if ((*was_colored || self->face->glyph->metrics.width > 0) && bm.width > 0) {
-            place_bitmap_in_canvas(canvas, &bm, canvas_width, cell_height, x_offset, y, baseline);
+            place_bitmap_in_canvas(canvas, &bm, canvas_width, cell_height, x_offset, y, baseline, i);
         }
         x += (float)positions[i].x_advance / 64.0f;
         free_processed_bitmap(&bm);
@@ -668,7 +683,7 @@ render_simple_text_impl(PyObject *s, const char *text, unsigned int baseline) {
         FT_Bitmap *bitmap = &self->face->glyph->bitmap;
         pbm = EMPTY_PBM;
         populate_processed_bitmap(self->face->glyph, bitmap, &pbm, false);
-        place_bitmap_in_canvas(canvas, &pbm, canvas_width, canvas_height, pen_x, 0, baseline);
+        place_bitmap_in_canvas(canvas, &pbm, canvas_width, canvas_height, pen_x, 0, baseline, n);
         pen_x += self->face->glyph->advance.x >> 6;
     }
     ans.width = pen_x; ans.height = canvas_height;

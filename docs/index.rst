@@ -221,8 +221,7 @@ For example:
     # vim in it
     launch --env FOO=BAR vim
     # Set the title for the next window
-    title Chat with x
-    launch irssi --profile x
+    launch --title "Chat with x" irssi --profile x
 
     # Create a new tab (the part after new_tab is the optional tab
     # name which will be displayed in the tab bar, if omitted, the
@@ -346,8 +345,6 @@ Frequently Asked Questions
 
 The list of Frequently Asked Questions (*FAQ*) is :doc:`available here <faq>`.
 
-.. _completion:
-
 
 Cool integrations for kitty with other CLI tools
 --------------------------------------------------
@@ -356,6 +353,8 @@ kitty provides extremely powerful interfaces such as :doc:`remote-control` and
 :doc:`kittens/custom` and :doc:`kittens/icat`
 that allow it to be integrated with other tools seamlessly. For a list of such
 user created integrations, see: :doc:`integrations`.
+
+.. _completion:
 
 Completion for kitty
 ---------------------------------

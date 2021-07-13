@@ -4,14 +4,98 @@ Changelog
 |kitty| is a feature-rich, cross-platform, *fast*, GPU based terminal.
 To update |kitty|, :doc:`follow the instructions <binary>`.
 
-0.21.0 [future]
+0.21.3 [future]
 ----------------------
+
+- Add a new :ref:`action-toggle_layout` action to easily zoom/unzoom a window
+
+- When right clicking to extend a selection, move the nearest selection
+  boundary rather than the end of the selection. To restore previous behavior
+  use ``mouse_map right press ungrabbed mouse_selection move-end``.
+
+- Fix a bug in the implementation of the synchronized updates escape code that
+  could cause incorrect parsing if either the pending buffer capacity or the
+  pending timeout were exceeded (:iss:`3779`)
+
+- diff kitten: Remove limit on max line length of 4096 characters (:iss:`3806`)
+
+- Fix turning off cursor blink via escape codes not working (:iss:`3808`)
+
+- Allow using neighboring window operations in the stack layout. The previous
+  window is considered the left and top neighbor and the next window is
+  considered the bottom and right neighbor (:iss:`3778`)
+
+- macOS: Render colors in the sRGB colorspace to match other macOS terminal
+  applications (:iss:`2249`)
+
+
+0.21.2 [2021-06-28]
+----------------------
+
+- A new :opt:`adjust_baseline` option to adjust the vertical alignment of text
+  inside a line (:pull:`3734`)
+
+- A new :opt:`url_excluded_characters` option to exclude additional characters
+  when detecting URLs under the mouse (:pull:`3738`)
+
+- Fix a regression in 0.21.0 that broke rendering of private use Unicode symbols followed
+  by spaces, when they also exist not followed by spaces (:iss:`3729`)
+
+- ssh kitten: Support systems where the login shell is a non-POSIX shell
+  (:iss:`3405`)
+
+- ssh kitten: Add completion (:iss:`3760`)
+
+- ssh kitten: Fix "Connection closed" message being printed by ssh when running
+  remote commands
+
+- Add support for the XTVERSION escape code
+
+- macOS: Fix a regression in 0.21.0 that broke middle-click to paste from clipboard (:iss:`3730`)
+
+- macOS: Fix shortcuts in the global menu bar responding slowly when cursor blink
+  is disabled/timed out (:iss:`3693`)
+
+- When displaying scrollback ensure that the window does not quit if the amount
+  of scrollback is less than a screen and the user has the ``--quit-if-one-screen``
+  option enabled for less (:iss:`3740`)
+
+- Linux: Fix Emoji/bitmapped fonts not use able in symbol_map
+
+- query terminal kitten: Allow querying font face and size information
+  (:iss:`3756`)
+
+- hyperlinked grep kitten: Fix context options not generating contextual output (:iss:`3759`)
+
+- Allow using superscripts in tab titles (:iss:`3763`)
+
+- Unicode input kitten: Fix searching when a word has more than 1024 matches (:iss:`3773`)
+
+
+0.21.1 [2021-06-14]
+----------------------
+
+- macOS: Fix a regression in the previous release that broke rendering of
+  strikeout (:iss:`3717`)
+
+- macOS: Fix a crash when rendering ligatures larger than 128 characters
+  (:iss:`3724`)
+
+- Fix a regression in the previous release that could cause a crash when
+  changing layouts and mousing (:iss:`3713`)
+
+
+0.21.0 [2021-06-12]
+----------------------
+
+- Allow reloading the :file:`kitty.conf` config file by pressing
+  :sc:`reload_config_file`. (:iss:`1292`)
 
 - Allow clicking URLs to open them without needing to also hold
   :kbd:`ctrl+shift`
 
 - Allow remapping all mouse button press/release events to perform arbitrary
-  actions. :ref:`See details <conf-kitty-mouse.mousemap>`.
+  actions. :ref:`See details <conf-kitty-mouse.mousemap>` (:iss:`1033`)
 
 - Support infinite length ligatures (:iss:`3504`)
 
@@ -27,6 +111,9 @@ To update |kitty|, :doc:`follow the instructions <binary>`.
 
 - Add the ability to un-scroll the screen to the ``kitty @ scroll-window``
   remote control command (:iss:`3604`)
+
+- A new option, :opt:`tab_bar_margin_height` to add margins around the
+  top and bottom edges of the tab bar (:iss:`3247`)
 
 - Unicode input kitten: Fix a regression in 0.20.0 that broke keyboard handling
   when the NumLock or CapsLock modifiers were engaged. (:iss:`3587`)
@@ -71,7 +158,24 @@ To update |kitty|, :doc:`follow the instructions <binary>`.
   executing any command specified on the command line via the users' shell
   just as ssh does (:iss:`3638`)
 
+- Fix trailing parentheses in URLs not being detected (:iss:`3688`)
+
 - Tab bar: Use a lower contrast color for tab separators (:pull:`3666`)
+
+- Fix a regression that caused using the ``title`` command in session files
+  to stop working (:iss:`3676`)
+
+- macOS: Fix a rare crash on exit (:iss:`3686`)
+
+- Fix ligatures not working with the `Iosevka
+  <https://github.com/be5invis/Iosevka>`_ font (requires Iosevka >= 7.0.4)
+  (:iss:`297`)
+
+- Remote control: Allow matching tabs by index number in currently active OS
+  Window (:iss:`3708`)
+
+- ssh kitten: Fix non-standard properties in terminfo such as the ones used for
+  true color not being copied (:iss:`312`)
 
 
 0.20.3 [2021-05-06]
@@ -858,7 +962,7 @@ To update |kitty|, :doc:`follow the instructions <binary>`.
 - macOS: Add a :code:`titlebar-only` setting to
   :opt:`hide_window_decorations` to only hide the title bar (:pull:`2286`)
 
-- Fix a segfault when using :option:`kitty --debug-config` with maps (:iss:`2270`)
+- Fix a segfault when using ``--debug-config`` with maps (:iss:`2270`)
 
 - ``goto_tab`` now maps numbers larger than the last tab to the last tab
   (:iss:`2291`)
@@ -1734,8 +1838,8 @@ To update |kitty|, :doc:`follow the instructions <binary>`.
 
 - Support "-T" as an alias for "--title" (:pull:`659`)
 
-- Fix a regression in the previous release that broke using :option:`kitty
-  --debug-config` with custom key mappings (:iss:`695`)
+- Fix a regression in the previous release that broke using
+  ``--debug-config`` with custom key mappings (:iss:`695`)
 
 
 0.11.1 [2018-06-17]

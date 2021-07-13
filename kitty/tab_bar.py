@@ -3,7 +3,7 @@
 # License: GPL v3 Copyright: 2018, Kovid Goyal <kovid at kovidgoyal.net>
 
 from functools import lru_cache
-from typing import Any, Dict, NamedTuple, Optional, Sequence, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from .config import build_ansi_color_table
 from .fast_data_types import (
@@ -12,7 +12,7 @@ from .fast_data_types import (
 )
 from .layout.base import Rect
 from .rgb import Color, alpha_blend, color_as_sgr, color_from_int, to_color
-from .types import WindowGeometry
+from .types import WindowGeometry, run_once
 from .typing import PowerlineStyle
 from .utils import color_as_int, log_error
 from .window import calculate_gl_geometry
@@ -91,6 +91,30 @@ class Formatter:
     noitalic = '\x1b[23m'
 
 
+@run_once
+def super_sub_maps() -> Tuple[dict, dict]:
+    import string
+    sup_table = str.maketrans(
+        string.ascii_lowercase + string.ascii_uppercase + string.digits + '+-=()',
+        'ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖqʳˢᵗᵘᵛʷˣʸᶻ' 'ᴬᴮᶜᴰᴱᶠᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾQᴿˢᵀᵁⱽᵂˣʸᶻ' '⁰¹²³⁴⁵⁶⁷⁸⁹' '⁺⁻⁼⁽⁾')
+    sub_table = str.maketrans(
+        string.ascii_lowercase + string.ascii_uppercase + string.digits + '+-=()',
+        'ₐbcdₑfgₕᵢⱼₖₗₘₙₒₚqᵣₛₜᵤᵥwₓyz' 'ₐbcdₑfgₕᵢⱼₖₗₘₙₒₚqᵣₛₜᵤᵥwₓyz' '₀₁₂₃₄₅₆₇₈₉' '₊₋₌₍₎')
+    return sup_table, sub_table
+
+
+class SupSub:
+
+    def __init__(self, data: dict, is_subscript: bool = False):
+        self.__data = data
+        self.__is_subscript = is_subscript
+
+    def __getattr__(self, name: str) -> str:
+        name = str(self.__data.get(name, name))
+        table = super_sub_maps()[int(self.__is_subscript)]
+        return name.translate(table)
+
+
 def draw_title(draw_data: DrawData, screen: Screen, tab: TabBarData, index: int) -> None:
     if tab.needs_attention and draw_data.bell_on_tab:
         fg = screen.cursor.fg
@@ -107,12 +131,20 @@ def draw_title(draw_data: DrawData, screen: Screen, tab: TabBarData, index: int)
     if tab.is_active and draw_data.active_title_template is not None:
         template = draw_data.active_title_template
     try:
+        data = {
+            'index': index,
+            'layout_name': tab.layout_name,
+            'num_windows': tab.num_windows,
+            'title': tab.title,
+        }
         eval_locals = {
             'index': index,
             'layout_name': tab.layout_name,
             'num_windows': tab.num_windows,
             'title': tab.title,
             'fmt': Formatter,
+            'sup': SupSub(data),
+            'sub': SupSub(data, True),
         }
         title = eval(compile_template(template), {'__builtins__': {}}, eval_locals)
     except Exception as e:
@@ -256,19 +288,25 @@ class TabBar:
     def __init__(self, os_window_id: int):
         self.os_window_id = os_window_id
         self.num_tabs = 1
+        self.data_buffer_size = 0
+        self.blank_rects: Tuple[Rect, ...] = ()
+        self.laid_out_once = False
+        self.apply_options()
+
+    def apply_options(self) -> None:
         opts = get_options()
+        self.dirty = True
         self.margin_width = pt_to_px(opts.tab_bar_margin_width, self.os_window_id)
         self.cell_width, cell_height = cell_size_for_window(self.os_window_id)
-        self.data_buffer_size = 0
-        self.laid_out_once = False
-        self.dirty = True
-        self.screen = s = Screen(None, 1, 10, 0, self.cell_width, cell_height)
+        if not hasattr(self, 'screen'):
+            self.screen = s = Screen(None, 1, 10, 0, self.cell_width, cell_height)
+        else:
+            s = self.screen
         s.color_profile.update_ansi_color_table(build_ansi_color_table(opts))
         s.color_profile.set_configured_colors(
             color_as_int(opts.inactive_tab_foreground),
             color_as_int(opts.tab_bar_background or opts.background)
         )
-        self.blank_rects: Tuple[Rect, ...] = ()
         sep = opts.tab_separator
         self.trailing_spaces = self.leading_spaces = 0
         while sep and sep[0] == ' ':
@@ -324,6 +362,7 @@ class TabBar:
         central, tab_bar, vw, vh, cell_width, cell_height = viewport_for_window(self.os_window_id)
         if tab_bar.width < 2:
             return
+        opts = get_options()
         self.cell_width = cell_width
         s = self.screen
         viewport_width = max(4 * cell_width, tab_bar.width - 2 * self.margin_width)
@@ -334,10 +373,23 @@ class TabBar:
         margin = (viewport_width - ncells * cell_width) // 2 + self.margin_width
         self.window_geometry = g = WindowGeometry(
             margin, tab_bar.top, viewport_width - margin, tab_bar.bottom, s.columns, s.lines)
+        blank_rects: List[Rect] = []
         if margin > 0:
-            self.blank_rects = (Rect(0, g.top, g.left, g.bottom + 1), Rect(g.right - 1, g.top, viewport_width, g.bottom + 1))
-        else:
-            self.blank_rects = ()
+            blank_rects.append(Rect(0, g.top, g.left, g.bottom + 1))
+            blank_rects.append(Rect(g.right - 1, g.top, viewport_width, g.bottom + 1))
+        if opts.tab_bar_margin_height:
+            if opts.tab_bar_edge == 3:  # bottom
+                if opts.tab_bar_margin_height.outer:
+                    blank_rects.append(Rect(0, tab_bar.bottom + 1, vw, vh))
+                if opts.tab_bar_margin_height.inner:
+                    blank_rects.append(Rect(0, central.bottom + 1, vw, vh))
+            else:  # top
+                if opts.tab_bar_margin_height.outer:
+                    blank_rects.append(Rect(0, 0, vw, tab_bar.top))
+                if opts.tab_bar_margin_height.inner:
+                    blank_rects.append(Rect(0, tab_bar.bottom + 1, vw, central.top))
+
+        self.blank_rects = tuple(blank_rects)
         self.screen_geometry = sg = calculate_gl_geometry(g, vw, vh, cell_width, cell_height)
         set_tab_bar_render_data(self.os_window_id, sg.xstart, sg.ystart, sg.dx, sg.dy, self.screen)
 

@@ -101,7 +101,8 @@ features of the graphics protocol:
    import sys
    from base64 import standard_b64encode
 
-   def serialize_gr_command(cmd, payload=None):
+   def serialize_gr_command(**cmd):
+      payload = cmd.pop('payload', None)
       cmd = ','.join('{}={}'.format(k, v) for k, v in cmd.items())
       ans = []
       w = ans.append
@@ -112,18 +113,17 @@ features of the graphics protocol:
       w(b'\033\\')
       return b''.join(ans)
 
-   def write_chunked(cmd, data):
-      data = standard_b64encode(data)
+   def write_chunked(**cmd):
+      data = standard_b64encode(cmd.pop('data'))
       while data:
          chunk, data = data[:4096], data[4096:]
          m = 1 if data else 0
-         cmd['m'] = m
-         sys.stdout.buffer.write(serialize_gr_command(cmd, chunk))
+         sys.stdout.buffer.write(serialize_gr_command(payload=chunk, m=m, **cmd))
          sys.stdout.flush()
          cmd.clear()
 
    with open(sys.argv[-1], 'rb') as f:
-      write_chunked({'a': 'T', 'f': 100}, f.read())
+      write_chunked(a='T', f=100, data=f.read())
 
 
 Save this script as :file:`png.py`, then you can use it to display any PNG
@@ -226,8 +226,12 @@ Value of `t`          Meaning
                       is in a known temporary directory, such as :file:`/tmp`,
                       :file:`/dev/shm`, :file:`TMPDIR env var if present` and any platform
                       specific temporary directories.
-``s``                 A `POSIX shared memory object <http://man7.org/linux/man-pages/man7/shm_overview.7.html>`_.
-                      The terminal emulator will delete it after reading the pixel data
+``s``                 A *shared memory object*, which on POSIX systems is a `POSIX shared memory object
+                      <https://man7.org/linux/man-pages/man7/shm_overview.7.html>`_ and on Windows is a
+                      `Named shared memory object <https://docs.microsoft.com/en-us/windows/win32/memory/creating-named-shared-memory>`_.
+                      The terminal emulator must read the data from the memory
+                      object and then unlink and close it on POSIX and just
+                      close it on Windows.
 ==================    ============
 
 Local client
@@ -312,7 +316,7 @@ While as of May 2020, kitty is the only terminal emulator to support this
 graphics protocol, we intend that any terminal emulator that wishes to support
 it can. To check if a terminal emulator supports the graphics protocol the best way
 is to send the above *query action* followed by a request for the
-`primary device attributes <https://vt100.net/docs/vt510-rm/DA1.html>`. If you
+`primary device attributes <https://vt100.net/docs/vt510-rm/DA1.html>`_. If you
 get back an answer for the device attributes without getting back an answer for
 the *query action* the terminal emulator does not support the graphics
 protocol.
@@ -586,7 +590,7 @@ Clients can control animations by using the ``a=a`` key in the escape code sent
 to the terminal.
 
 The simplest is client driven animations, where the client transmits the frame
-data and the also instructs the terminal to make a particular frame the current
+data and then also instructs the terminal to make a particular frame the current
 frame.  To change the current frame, use the ``c`` key::
 
     <ESC>_Ga=a,i=3,c=7<ESC>\
@@ -650,8 +654,8 @@ take, and the default value they take when missing. All integers are 32-bit.
 Key      Value                 Default    Description
 =======  ====================  =========  =================
 ``a``    Single character.     ``t``      The overall action this graphics command is performing.
-         ``(t, T, q, p, d)``              ``t`` - transmit data, ``T`` - transmit data and display image,
-                                          ``q`` - query terminal, ``p`` - put (display) previous transmitted image,
+         ``(a, d, f,``                    ``t`` - transmit data, ``T`` - transmit data and display image,
+         ``p, q, t, T)``                  ``q`` - query terminal, ``p`` - put (display) previous transmitted image,
                                           ``d`` - delete image, ``f`` - transmit data for animation frames,
                                           ``a`` - control animation
 

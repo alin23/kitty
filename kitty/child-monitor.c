@@ -83,7 +83,7 @@ static unsigned long remove_notify[MAX_CHILDREN] = {0};
 static size_t add_queue_count = 0, remove_queue_count = 0;
 static struct pollfd fds[MAX_CHILDREN + EXTRA_FDS] = {{0}};
 static pthread_mutex_t children_lock, talk_lock;
-static bool kill_signal_received = false;
+static bool kill_signal_received = false, reload_config_signal_received = false;
 static ChildMonitor *the_monitor = NULL;
 
 typedef struct {
@@ -333,7 +333,7 @@ static bool
 parse_input(ChildMonitor *self) {
     // Parse all available input that was read in the I/O thread.
     size_t count = 0, remove_count = 0;
-    bool input_read = false;
+    bool input_read = false, reload_config_called = false;
     monotonic_t now = monotonic();
     children_mutex(lock);
     while (remove_queue_count) {
@@ -343,11 +343,17 @@ parse_input(ChildMonitor *self) {
         FREE_CHILD(remove_queue[remove_queue_count]);
     }
 
-    if (UNLIKELY(kill_signal_received)) {
-        global_state.quit_request = IMPERATIVE_CLOSE_REQUESTED;
-        global_state.has_pending_closes = true;
-        request_tick_callback();
-        kill_signal_received = false;
+    if (UNLIKELY(kill_signal_received || reload_config_signal_received)) {
+        if (kill_signal_received) {
+            global_state.quit_request = IMPERATIVE_CLOSE_REQUESTED;
+            global_state.has_pending_closes = true;
+            request_tick_callback();
+            kill_signal_received = false;
+        }
+        else if (reload_config_signal_received) {
+            reload_config_signal_received = false;
+            reload_config_called = true;
+        }
     } else {
         count = self->count;
         for (size_t i = 0; i < count; i++) {
@@ -401,6 +407,9 @@ parse_input(ChildMonitor *self) {
             if (do_parse(self, scratch[i].screen, now)) input_read = true;
         }
         DECREF_CHILD(scratch[i]);
+    }
+    if (reload_config_called) {
+        call_boss(load_config_file, "");
     }
     return input_read;
 }
@@ -514,7 +523,7 @@ collect_cursor_info(CursorRenderInfo *ans, Window *w, monotonic_t now, OSWindow 
     ans->is_visible = false;
     if (rd->screen->scrolled_by || !screen_is_cursor_visible(rd->screen)) return;
     monotonic_t time_since_start_blink = now - os_window->cursor_blink_zero_time;
-    bool cursor_blinking = OPT(cursor_blink_interval) > 0 && os_window->is_focused && (OPT(cursor_stop_blinking_after) == 0 || time_since_start_blink <= OPT(cursor_stop_blinking_after));
+    bool cursor_blinking = OPT(cursor_blink_interval) > 0 && !cursor->non_blinking && os_window->is_focused && (OPT(cursor_stop_blinking_after) == 0 || time_since_start_blink <= OPT(cursor_stop_blinking_after));
     bool do_draw_cursor = true;
     if (cursor_blinking) {
         int t = monotonic_t_to_ms(time_since_start_blink);
@@ -935,7 +944,8 @@ process_pending_closes(ChildMonitor *self) {
 // If we create new OS windows during wait_events(), using global menu actions
 // via the mouse causes a crash because of the way autorelease pools work in
 // glfw/cocoa. So we use a flag instead.
-static CocoaPendingAction cocoa_pending_actions = NO_COCOA_PENDING_ACTION;
+static bool cocoa_pending_actions[NUM_COCOA_PENDING_ACTIONS] = {0};
+static bool has_cocoa_pending_actions = false;
 typedef struct {
     char* wd;
     char **open_files;
@@ -955,10 +965,46 @@ set_cocoa_pending_action(CocoaPendingAction action, const char *wd) {
             cocoa_pending_actions_data.wd = strdup(wd);
         }
     }
-    cocoa_pending_actions |= action;
+    cocoa_pending_actions[action] = true;
+    has_cocoa_pending_actions = true;
     // The main loop may be blocking on the event queue, if e.g. unfocused.
     // Unjam it so the pending action is processed right now.
     wakeup_main_loop();
+}
+
+static void
+process_cocoa_pending_actions(void) {
+    if (cocoa_pending_actions[PREFERENCES_WINDOW]) { call_boss(edit_config_file, NULL); }
+    if (cocoa_pending_actions[NEW_OS_WINDOW]) { call_boss(new_os_window, NULL); }
+    if (cocoa_pending_actions[CLOSE_OS_WINDOW]) { call_boss(close_os_window, NULL); }
+    if (cocoa_pending_actions[CLOSE_TAB]) { call_boss(close_tab, NULL); }
+    if (cocoa_pending_actions[NEW_TAB]) { call_boss(new_tab, NULL); }
+    if (cocoa_pending_actions[NEXT_TAB]) { call_boss(next_tab, NULL); }
+    if (cocoa_pending_actions[PREVIOUS_TAB]) { call_boss(previous_tab, NULL); }
+    if (cocoa_pending_actions[DETACH_TAB]) { call_boss(detach_tab, NULL); }
+    if (cocoa_pending_actions[NEW_WINDOW]) { call_boss(new_window, NULL); }
+    if (cocoa_pending_actions[CLOSE_WINDOW]) { call_boss(close_window, NULL); }
+    if (cocoa_pending_actions[RESET_TERMINAL]) { call_boss(clear_terminal, "sO", "reset", Py_True ); }
+    if (cocoa_pending_actions[RELOAD_CONFIG]) { call_boss(load_config_file, NULL); }
+    if (cocoa_pending_actions_data.wd) {
+        if (cocoa_pending_actions[NEW_OS_WINDOW_WITH_WD]) { call_boss(new_os_window_with_wd, "s", cocoa_pending_actions_data.wd); }
+        if (cocoa_pending_actions[NEW_TAB_WITH_WD]) { call_boss(new_tab_with_wd, "s", cocoa_pending_actions_data.wd); }
+        free(cocoa_pending_actions_data.wd);
+        cocoa_pending_actions_data.wd = NULL;
+    }
+    if (cocoa_pending_actions_data.open_files_count) {
+        for (unsigned cpa = 0; cpa < cocoa_pending_actions_data.open_files_count; cpa++) {
+            if (cocoa_pending_actions_data.open_files[cpa]) {
+                call_boss(open_file, "s", cocoa_pending_actions_data.open_files[cpa]);
+                free(cocoa_pending_actions_data.open_files[cpa]);
+                cocoa_pending_actions_data.open_files[cpa] = NULL;
+            }
+        }
+        cocoa_pending_actions_data.open_files_count = 0;
+    }
+    memset(cocoa_pending_actions, 0, sizeof(cocoa_pending_actions));
+    has_cocoa_pending_actions = false;
+
 }
 #endif
 
@@ -988,35 +1034,10 @@ process_global_state(void *data) {
     if (parse_input(self)) input_read = true;
     render(now, input_read);
 #ifdef __APPLE__
-        if (cocoa_pending_actions) {
-            if (cocoa_pending_actions & PREFERENCES_WINDOW) { call_boss(edit_config_file, NULL); }
-            if (cocoa_pending_actions & NEW_OS_WINDOW) { call_boss(new_os_window, NULL); }
-            if (cocoa_pending_actions & CLOSE_OS_WINDOW) { call_boss(close_os_window, NULL); }
-            if (cocoa_pending_actions & CLOSE_TAB) { call_boss(close_tab, NULL); }
-            if (cocoa_pending_actions & NEW_TAB) { call_boss(new_tab, NULL); }
-            if (cocoa_pending_actions & NEXT_TAB) { call_boss(next_tab, NULL); }
-            if (cocoa_pending_actions & PREVIOUS_TAB) { call_boss(previous_tab, NULL); }
-            if (cocoa_pending_actions & DETACH_TAB) { call_boss(detach_tab, NULL); }
-            if (cocoa_pending_actions & NEW_WINDOW) { call_boss(new_window, NULL); }
-            if (cocoa_pending_actions & CLOSE_WINDOW) { call_boss(close_window, NULL); }
-            if (cocoa_pending_actions_data.wd) {
-                if (cocoa_pending_actions & NEW_OS_WINDOW_WITH_WD) { call_boss(new_os_window_with_wd, "s", cocoa_pending_actions_data.wd); }
-                if (cocoa_pending_actions & NEW_TAB_WITH_WD) { call_boss(new_tab_with_wd, "s", cocoa_pending_actions_data.wd); }
-                free(cocoa_pending_actions_data.wd);
-                cocoa_pending_actions_data.wd = NULL;
-            }
-            if (cocoa_pending_actions_data.open_files_count) {
-                for (unsigned cpa = 0; cpa < cocoa_pending_actions_data.open_files_count; cpa++) {
-                    if (cocoa_pending_actions_data.open_files[cpa]) {
-                        call_boss(open_file, "s", cocoa_pending_actions_data.open_files[cpa]);
-                        free(cocoa_pending_actions_data.open_files[cpa]);
-                        cocoa_pending_actions_data.open_files[cpa] = NULL;
-                    }
-                }
-                cocoa_pending_actions_data.open_files_count = 0;
-            }
-            cocoa_pending_actions = 0;
-        }
+    if (has_cocoa_pending_actions) {
+        process_cocoa_pending_actions();
+        maximum_wait = 0;  // ensure loop ticks again so that the actions side effects are performed immediately
+    }
 #endif
     report_reaped_pids();
     bool should_quit = false;
@@ -1144,7 +1165,7 @@ read_bytes(int fd, Screen *screen) {
 }
 
 
-typedef struct { bool kill_signal, child_died; } SignalSet;
+typedef struct { bool kill_signal, child_died, reload_config; } SignalSet;
 
 static void
 handle_signal(int signum, void *data) {
@@ -1156,6 +1177,9 @@ handle_signal(int signum, void *data) {
             break;
         case SIGCHLD:
             ss->child_died = true;
+            break;
+        case SIGUSR1:
+            ss->reload_config = true;
             break;
         default:
             break;
@@ -1271,7 +1295,12 @@ io_loop(void *data) {
                 SignalSet ss = {0};
                 data_received = true;
                 read_signals(fds[1].fd, handle_signal, &ss);
-                if (ss.kill_signal) { children_mutex(lock); kill_signal_received = true; children_mutex(unlock); }
+                if (ss.kill_signal || ss.reload_config) {
+                    children_mutex(lock);
+                    if (ss.kill_signal) kill_signal_received = true;
+                    if (ss.reload_config) reload_config_signal_received = true;
+                    children_mutex(unlock);
+                }
                 if (ss.child_died) reap_children(self, OPT(close_on_child_death));
             }
             for (i = 0; i < self->count; i++) {
